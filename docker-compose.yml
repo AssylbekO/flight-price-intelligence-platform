@@ -1,0 +1,105 @@
+version: '3.8'
+
+# ---------------------------------------------------------------------------
+# Shared Airflow config — inherited by webserver, scheduler, and init
+# ---------------------------------------------------------------------------
+x-airflow-common: &airflow-common
+  image: ${AIRFLOW_IMAGE_NAME}
+  environment:
+    - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+    - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/airflow_metadata
+    - AIRFLOW__CORE__FERNET_KEY=${FERNET_KEY}
+    - AIRFLOW__CORE__LOAD_EXAMPLES=false
+    - AIRFLOW__WEBSERVER__EXPOSE_CONFIG=true
+    # AWS credentials passed into all Airflow containers for boto3
+    - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+    - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+    - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
+    # PostgreSQL data warehouse connection (used by ingestion scripts and dbt)
+    - POSTGRES_USER=${POSTGRES_USER}
+    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    - POSTGRES_DB=${POSTGRES_DB}
+    - POSTGRES_HOST=postgres
+    - POSTGRES_PORT=5432
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags
+    - ./airflow/logs:/opt/airflow/logs
+    - ./airflow/plugins:/opt/airflow/plugins
+    - ./ingestion:/opt/airflow/ingestion        # Python ingestion scripts
+    - ./dbt_flight:/opt/airflow/dbt_flight      # dbt project (for later)
+  user: "${AIRFLOW_UID:-50000}:0"
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+# ---------------------------------------------------------------------------
+# Services
+# ---------------------------------------------------------------------------
+services:
+
+  # --- PostgreSQL -----------------------------------------------------------
+  # Hosts TWO databases:
+  #   flight_intelligence  — your data warehouse (raw + dbt models)
+  #   airflow_metadata     — Airflow's internal metadata (created by init script)
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d   # creates airflow_metadata DB
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # --- Airflow init (runs once, then exits) ---------------------------------
+  # Runs db migrations only. User creation is handled by the webserver
+  # on first boot so it runs after the DB is fully ready.
+  airflow-init:
+    <<: *airflow-common
+    user: "0:0"
+    command: airflow db migrate
+    restart: "no"
+
+  # --- Airflow webserver ----------------------------------------------------
+  airflow-webserver:
+    <<: *airflow-common
+    command: >
+      bash -c "
+        airflow db init &&
+        airflow users create \
+          --username '${_AIRFLOW_WWW_USER_USERNAME}' \
+          --password '${_AIRFLOW_WWW_USER_PASSWORD}' \
+          --firstname Admin \
+          --lastname User \
+          --role Admin \
+          --email admin@example.com || true &&
+        airflow webserver
+      "
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  # --- Airflow scheduler ----------------------------------------------------
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    restart: unless-stopped
+
+# ---------------------------------------------------------------------------
+# Volumes
+# ---------------------------------------------------------------------------
+volumes:
+  postgres_data:

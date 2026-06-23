@@ -37,7 +37,6 @@ def get_db_engine():
     engine = create_engine(connection_string)
     return engine
 
-
 if __name__ == "__main__":
     print(os.getenv("POSTGRES_DB"))
 

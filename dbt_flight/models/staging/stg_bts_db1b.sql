@@ -35,4 +35,4 @@ renamed_and_casted AS (
       AND passengers > 0
       AND distance > 0
 )
-SELECT * FROM renamed_and_casted¬
+SELECT * FROM renamed_and

@@ -2,7 +2,7 @@
 
 # Flight Price Intelligence Platform
 
-An end-to-end data engineering platform that ingests US domestic flight data from the BTS DB1B dataset, transforms it into analytics-ready models, and exposes pricing signals for machine learning — built on AWS S3, PostgreSQL, dbt, and Apache Airflow.
+An end-to-end data engineering platform that ingests US domestic flight data from the BTS DB1B dataset, transforms it into analytics-ready models, and exposes pricing signals for machine learning. This project ingests massive historical datasets, transforms them through a strict Medallion architecture, and applies XGBoost regression and statistical anomaly detection to uncover the economic drivers of airline pricing. Built on AWS S3, PostgreSQL, dbt, and Apache Airflow. 
 
 ---
 
